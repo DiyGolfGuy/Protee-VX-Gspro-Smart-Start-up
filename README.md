@@ -30,9 +30,9 @@ You do **not** need AutoHotkey installed to run the compiled `.exe` — it's sel
 
 ## Install
 
-1. Download the latest `ProTeeAutoStart.exe` from the [Releases](../../releases) page.
-2. Put it somewhere permanent, for example `C:\ProTeeAutoStart\`.
-3. Run it once. The Setup window opens — fill in your settings and click Save.
+1. Download the latest `ProTeeAutoStart-x.x.x.zip` from the [Releases](../../releases) page.
+2. Extract it somewhere permanent, for example `C:\ProTeeAutoStart\`. Each release lists the SHA-256 of the `.exe` so you can verify your download is genuine.
+3. Run `ProTeeAutoStart.exe` once. The Setup window opens — fill in your settings and click Save.
 4. Add it to Windows startup so it runs on boot: press `Win + R`, type `shell:startup`, and drop a shortcut to the `.exe` into that folder.
 
 That's it. The next time the PC boots, it runs on its own.
@@ -59,6 +59,7 @@ Everything is in the Setup window:
   - *Pre-click pause (ms)* — delay after moving the cursor before clicking. Raise it on slower machines.
 - **Alert webhook URL** — optional. If the sequence times out, it pings this URL (a Twilio number, a webhook relay, etc.) so you know a bay needs a look.
 - **Banner display monitor** — which screen the banner sits on. `Auto` follows GSPro automatically and is right for almost everyone. You can also force a monitor number (`1`, `2`, ...), or set it to `Off`.
+- **Stop at the GSPro main menu** — tick this if you'd rather the bay finish on the GSPro main menu instead of going into the practice range. The tool still clicks Play and waits for the launch monitor to connect; it just stops at the menu and brings GSPro to the front so the ProTee connector window isn't sitting on top of it.
 
 There are test buttons next to the settings: Test Power-Cycle fires the Shelly once so you can confirm the wiring, Test Screen Read runs a single OCR pass and shows what the tool currently sees, and Start Sequence Now runs the full sequence immediately without rebooting.
 
@@ -69,10 +70,20 @@ Settings are saved to `Documents\BA Custom Products\ProTee Auto-Start\`.
 Some machines block unsigned `.exe` files. If yours does, you can run the AutoHotkey script directly:
 
 1. Install [AutoHotkey v1.1](https://www.autohotkey.com/) (the classic v1 branch, not v2).
-2. Download `ProTeeAutoStart.ahk`.
+2. Download `ProTeeAutoStart.ahk` from this repository.
 3. Double-click it to run, or put a shortcut to it in `shell:startup`.
 
-The script behaves the same as the `.exe`.
+The script behaves the same as the `.exe`. The image files in this repository (`ba_logo_white.png`, `ba_logo_black.png`, `ba_qr.png`) are optional — the script runs fine without them and simply shows text where the images would be.
+
+## Compile it yourself (optional)
+
+Prefer to build the `.exe` from source? Everything you need is in this repository:
+
+1. Install [AutoHotkey v1.1](https://www.autohotkey.com/), which includes the Ahk2Exe compiler.
+2. Put `ProTeeAutoStart.ahk`, `ProTeeAutoStart.ico`, and the three `.png` files in one folder.
+3. Open Ahk2Exe, select the script, choose the **ANSI 32-bit** base file, leave compression **off**, and compile.
+
+The icon, version info, and images are picked up automatically from directives inside the script, so your build comes out identical to a release build.
 
 ## A note on the SmartScreen warning
 
@@ -93,4 +104,4 @@ We build and share tools for golf simulator operators — booking systems you ru
 
 ## License
 
-Free to use. You're welcome to run it, share it, and adapt it for your own facility.
+MIT — free to run, share, and adapt for your own facility. See [LICENSE](LICENSE).
