@@ -4,7 +4,7 @@
 ;@Ahk2Exe-SetCompanyName BA Custom Products
 ;@Ahk2Exe-SetCopyright (c) 2026 BA Custom Products
 ;@Ahk2Exe-SetOrigFilename ProTeeAutoStart.exe
-;@Ahk2Exe-SetVersion 2.0.0.0
+;@Ahk2Exe-SetVersion 2.1.0.0
 ; ============================================================================
 ;  ProTee Auto-Start Sequencer  v2.0   (OCR / reads the screen)
 ;  BA Custom Products
@@ -116,6 +116,8 @@ global StopAtMenu        := 0         ; 1 = end the sequence at the GSPro main m
 global playClicked := false, practiceClicked := false, rangeClicked := false
 global johnClicked := false, tries := 0, startTick := 0, pausedMs := 0
 global dbgRangeLogged := false
+global dbgFallbackLogged := false
+global dbgPlayLogged := false
 global bannerShown := false
 global gBannerMon := ""
 global gBannerCloaked := false   ; true when Windows excludes the banner from screen captures
@@ -337,7 +339,7 @@ RunSequence() {
     pausedMs  := 0
     playClicked := false, practiceClicked := false, rangeClicked := false
     johnClicked := false, tries := 0, dbgRangeLogged := false
-    bannerShown := false, menuReady := false, dbgUpdLogged := false
+    bannerShown := false, menuReady := false, dbgUpdLogged := false, dbgFallbackLogged := false, dbgPlayLogged := false
     Hotkey, Esc, KillNow, On
     Log("=== Startup sequence started ===")
 
@@ -361,15 +363,37 @@ RunSequence() {
         }
         ; Diagnostic: an update prompt is probably up but its button text didn't
         ; match. Log what OCR actually read, once, so the wording can be added.
-        if (!dbgUpdLogged && InStr(full.lc, "update") && !InStr(full.lc, "practice")) {
+        ; Informational only. Fires while the launcher is still up, so an update
+        ; prompt with unfamiliar wording gets recorded instead of silently stalling.
+        if (!dbgUpdLogged && InStr(full.lc, "update") && !InStr(full.lc, "practice")
+            && !WinRectByTitle("gspro configuration").found) {
             dbgUpdLogged := true
-            Log("Diagnostic: 'update' seen on screen but no 'download update' line matched. OCR read:`n" SubStr(full.text, 1, 1400))
+            Log("Note (not an error): the word 'update' is on screen but no 'Download Update' button was found."
+              . " This is normal while the launcher shows its update check. Screen text:`n" SubStr(full.text, 1, 1400))
         }
 
         ; --- 1) GSPro nav first (anchored to the GSPro window) ---
+        ; Each step reads the GSPro window itself. If that read comes up empty but
+        ; the whole-screen read (already taken above) clearly shows the same screen,
+        ; fall back to it: a window-scoped read can miss when Windows reports a bad
+        ; window rect (mixed display scaling) or the window is partly covered.
         if (!rangeClicked && !menuReady) {
             if (!playClicked) {
                 cfg := ScanWin("gspro configuration")
+                ; Ask Windows for the button position first - no reading involved,
+                ; so display scaling and unreadable button text cannot break it.
+                if (cfg.found) {
+                    pc := FindPlayControl(cfg.win.hwnd)
+                    if (pc.found) {
+                        WinActivate, % "ahk_id " cfg.win.hwnd
+                        Sleep, 200
+                        ClickAt(pc.x, pc.y)
+                        playClicked := true
+                        Log("Clicked Play! (dialog control """ pc.text """ at " pc.x "," pc.y ")")
+                        Sleep, 1800
+                        continue
+                    }
+                }
                 if (cfg.found && IsGSProConfig(cfg)) {
                     pl := FindPlay(cfg)
                     if (pl.found) {
@@ -378,6 +402,44 @@ RunSequence() {
                         Sleep, 1800
                         continue
                     }
+                }
+                if (cfg.found && IsGSProConfig(full)) {
+                    pl := FindPlay(full)
+                    if (pl.found) {
+                        LogFallback("Play!", cfg)
+                        ClickLineObj(pl), playClicked := true
+                        Log("Clicked Play! (whole-screen read)")
+                        Sleep, 1800
+                        continue
+                    }
+                }
+                ; Last resort: the dialog is confirmed on screen but neither Windows
+                ; nor OCR gave us the button. Play sits ~70% across and ~93% down the
+                ; dialog; Quit is well to its right, so this stays clear of it.
+                if (cfg.found && IsGSProConfig(cfg) && (A_TickCount - startTick) > 25000) {
+                    WinActivate, % "ahk_id " cfg.win.hwnd
+                    Sleep, 200
+                    px := cfg.win.x + Round(cfg.win.w * 0.70)
+                    py := cfg.win.y + Round(cfg.win.h * 0.93)
+                    ClickAt(px, py)
+                    playClicked := true
+                    Log("Clicked Play! (by position in the dialog, " px "," py ") - button was not readable and not exposed as a control")
+                    Sleep, 1800
+                    continue
+                }
+                ; One-shot diagnostic after 20s: say exactly why Play was not clicked.
+                if (!dbgPlayLogged && (A_TickCount - startTick) > 20000) {
+                    dbgPlayLogged := true
+                    d := "Play diagnostic: GSPro Configuration window " (cfg.found ? "FOUND" : "NOT FOUND")
+                    if (cfg.found)
+                        d .= " - Windows reports it at x" cfg.win.x " y" cfg.win.y " w" cfg.win.w " h" cfg.win.h
+                    d .= "`n  window read looks like the config screen: " (IsGSProConfig(cfg) ? "yes" : "no")
+                    d .= "`n  Play found in the window read: "           (FindPlay(cfg).found ? "yes" : "no")
+                    d .= "`n  whole screen looks like the config screen: " (IsGSProConfig(full) ? "yes" : "no")
+                    d .= "`n  Play found in the whole-screen read: "     (FindPlay(full).found ? "yes" : "no")
+                    d .= "`n  dialog controls Windows reports:`n" DumpControls(cfg.found ? cfg.win.hwnd : 0)
+                    d .= "  text read INSIDE the window rect:`n" SubStr(cfg.text, 1, 500)
+                    Log(d)
                 }
             } else if (!practiceClicked) {
                 menu := ScanWin("gspro", "configuration")
@@ -395,6 +457,21 @@ RunSequence() {
                         continue
                     }
                 }
+                if (menu.found && IsGSProMenu(full)) {
+                    if (StopAtMenu) {
+                        menuReady := true
+                        Log("GSPro main menu reached - stopping here (Stop at main menu is on).")
+                        continue
+                    }
+                    pr := FindPracticeTile(full)
+                    if (pr.found) {
+                        LogFallback("PRACTICE", menu)
+                        ClickLineObj(pr), practiceClicked := true
+                        Log("Clicked PRACTICE (whole-screen read)")
+                        Sleep, 1500
+                        continue
+                    }
+                }
             } else {
                 menu := ScanWin("gspro", "configuration")
                 if (menu.found && IsPracticeRangeScreen(menu)) {
@@ -408,6 +485,16 @@ RunSequence() {
                     if (!dbgRangeLogged) {
                         dbgRangeLogged := true
                         Log("On practice-range screen but tile not located. GSPro text read as:`n" SubStr(menu.text, 1, 1400))
+                    }
+                }
+                if (menu.found && IsPracticeRangeScreen(full)) {
+                    tile := FindPracticeRangeTile(full)
+                    if (tile.found) {
+                        LogFallback("PRACTICE RANGE", menu)
+                        ClickLineObj(tile), rangeClicked := true
+                        Log("Clicked PRACTICE RANGE tile (whole-screen read)")
+                        Sleep, 1500
+                        continue
                     }
                 }
             }
@@ -936,6 +1023,69 @@ ClickAt(x, y) {
     Sleep, %ClickDelayMs%
     Click
     Sleep, 250
+}
+
+; Ask Windows where the Play button is, instead of reading it off the screen.
+; The GSPro Configuration dialog is a normal Windows dialog, so its buttons are
+; real controls with names and exact screen positions. This is immune to display
+; scaling, resolution, blur, and anything covering the window.
+FindPlayControl(hwnd) {
+    if (!hwnd)
+        return {found: false}
+    WinGet, cl, ControlList, ahk_id %hwnd%
+    if (cl = "")
+        return {found: false}
+    Loop, Parse, cl, `n
+    {
+        ctl := A_LoopField
+        if (ctl = "")
+            continue
+        ControlGetText, txt, %ctl%, ahk_id %hwnd%
+        t := LowerStr(Trim(txt))
+        if (t = "")
+            continue
+        if (InStr(t, "play") && !InStr(t, "display") && !InStr(t, "player") && StrLen(t) <= 8) {
+            ControlGet, chwnd, Hwnd,, %ctl%, ahk_id %hwnd%
+            if (!chwnd)
+                continue
+            VarSetCapacity(rc, 16, 0)
+            if (!DllCall("GetWindowRect", "Ptr", chwnd, "Ptr", &rc))
+                continue
+            l := NumGet(rc, 0, "Int"), tp := NumGet(rc, 4, "Int")
+            r := NumGet(rc, 8, "Int"), b := NumGet(rc, 12, "Int")
+            if (r <= l || b <= tp)
+                continue
+            return {found: true, x: (l + r) // 2, y: (tp + b) // 2, ctl: ctl, text: txt}
+        }
+    }
+    return {found: false}
+}
+
+; List a dialog's controls and their captions, for the log.
+DumpControls(hwnd) {
+    out := ""
+    if (!hwnd)
+        return "    (no window)`n"
+    WinGet, cl, ControlList, ahk_id %hwnd%
+    Loop, Parse, cl, `n
+    {
+        if (A_LoopField = "")
+            continue
+        ControlGetText, t, %A_LoopField%, ahk_id %hwnd%
+        out .= "    " A_LoopField " = [" t "]`n"
+    }
+    return (out = "" ? "    (none - not a standard Windows dialog)`n" : out)
+}
+
+LogFallback(step, scan) {
+    global dbgFallbackLogged
+    if (dbgFallbackLogged)
+        return
+    dbgFallbackLogged := true
+    r := scan.win
+    Log("NOTE: " step " was not readable inside the GSPro window itself, but the whole-screen read found it."
+      . " Windows reported that window at x" r.x " y" r.y " w" r.w " h" r.h "."
+      . " If that rectangle looks wrong for where the window actually is, the two displays are very likely on different scaling.")
 }
 
 MonitorOf(x, y) {

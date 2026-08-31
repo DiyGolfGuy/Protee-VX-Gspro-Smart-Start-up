@@ -30,10 +30,11 @@ You do **not** need AutoHotkey installed to run the compiled `.exe` — it's sel
 
 ## Install
 
-1. Download the latest `ProTeeAutoStart-x.x.x.zip` from the [Releases](../../releases) page.
-2. Extract it somewhere permanent, for example `C:\ProTeeAutoStart\`. Each release lists the SHA-256 of the `.exe` so you can verify your download is genuine.
-3. Run `ProTeeAutoStart.exe` once. The Setup window opens — fill in your settings and click Save.
-4. Add it to Windows startup so it runs on boot: press `Win + R`, type `shell:startup`, and drop a shortcut to the `.exe` into that folder.
+1. Download the latest installer, `ProTeeAutoStart-Setup-x.x.x.zip`, from the [Releases](../../releases) page.
+2. Extract it and run the setup. Keep **Start automatically when you log in** ticked — that's how the tool is meant to run on a bay PC, and it saves you setting up the startup shortcut by hand.
+3. Open ProTee AutoStart from the Start Menu and press `S` during the countdown. The Setup window opens — fill in your settings and click Save.
+
+Each release lists the SHA-256 of the download so you can verify it's genuine. Prefer no installer? `ProTeeAutoStart-x.x.x.zip` on the same page is the bare program; extract it somewhere permanent and drop a shortcut into `shell:startup` yourself.
 
 That's it. The next time the PC boots, it runs on its own.
 
@@ -91,7 +92,8 @@ The `.exe` isn't code-signed yet, so Windows SmartScreen may show a blue "Window
 
 ## How it stays safe to leave running unattended
 
-- It clicks specific on-screen words rather than blind coordinates.
+- Where a button belongs to Windows — like Play on the GSPro Configuration dialog — it asks Windows for that button's exact position rather than reading the screen. That makes it immune to display scaling, resolution, monitor count, and anything sitting on top of the window.
+- Everywhere else it clicks specific on-screen words rather than blind coordinates.
 - `ESC` aborts instantly.
 - An overall timeout stops it if something is wrong, and it can alert you over a webhook.
 - The banner is pinned to the bottom strip, clear of every button it reads or clicks.
