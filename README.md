@@ -40,9 +40,12 @@ That's it. The next time the PC boots, it runs on its own.
 
 ## Everyday use
 
+Starting it from a game launcher or kiosk instead of Windows startup? Untick **Start automatically when you log in** during install and have the launcher run `ProTeeAutoStart.exe /run`, which starts the sequence straight away with no countdown.
+
 When it launches normally (from the Startup folder) it waits out a short countdown and then runs.
 
 - Press `S` during the countdown to open Setup.
+- Press `Ctrl+Shift+D` at any time while it's running to kill it instantly, even with the input lock on.
 - Press `ESC` at any time to abort the sequence.
 
 ## Settings
@@ -60,6 +63,7 @@ Everything is in the Setup window:
   - *Pre-click pause (ms)* — delay after moving the cursor before clicking. Raise it on slower machines.
 - **Alert webhook URL** — optional. If the sequence times out, it pings this URL (a Twilio number, a webhook relay, etc.) so you know a bay needs a look.
 - **Banner display monitor** — which screen the banner sits on. `Auto` follows GSPro automatically and is right for almost everyone. You can also force a monitor number (`1`, `2`, ...), or set it to `Off`.
+- **Lock the mouse and keyboard while it runs** — tick this so nobody standing at the bay can click or type while the tool is working. The tool's own clicks still go through, it needs no administrator rights, and it unlocks automatically the moment the tool finishes, times out, or closes. While the lock is on, ESC won't abort the run, but **Ctrl+Shift+D** kills AutoStart instantly (lock or no lock), and Ctrl+Alt+Del always works.
 - **Stop at the GSPro main menu** — tick this if you'd rather the bay finish on the GSPro main menu instead of going into the practice range. The tool still clicks Play and waits for the launch monitor to connect; it just stops at the menu and brings GSPro to the front so the ProTee connector window isn't sitting on top of it.
 
 There are test buttons next to the settings: Test Power-Cycle fires the Shelly once so you can confirm the wiring, Test Screen Read runs a single OCR pass and shows what the tool currently sees, and Start Sequence Now runs the full sequence immediately without rebooting.
