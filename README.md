@@ -1,14 +1,14 @@
 # ProTee AutoStart
 
-Hands-off startup for golf simulator bays. When the sim PC boots, ProTee AutoStart watches the screen, clicks through the GSPro startup flow, and leaves the bay sitting at the practice range — ready for whoever walks in. No staff member has to log in, find the mouse, and start the sim every morning.
+Hands-off startup for golf simulator bays. ProTee AutoStart watches the screen, clicks through the GSPro startup flow, and leaves the bay sitting at the practice range (or the GSPro main menu, if you prefer), ready for whoever walks in. No staff member has to log in, find the mouse, and start the sim every morning.
 
-Built by BA Custom Products and free to use.
+> **Free, and built by people who run golf sim bays.** If ProTee AutoStart saves you time, the best way to say thanks is to check out our **golf sim control boxes** and other simulator gear at **[bacustomproducts.com](https://www.bacustomproducts.com)**. Those sales are what keep tools like this free.
 
 ## What it does
 
-On startup it works through the sequence on its own:
+When it runs, it works through the sequence on its own:
 
-1. Dismisses the GSPro update prompt if one appears (clicks Download Update and waits for it to finish).
+1. Clicks through the ProTee update prompt if one appears (clicks Download Update and waits for it to finish).
 2. Clicks Play! on the GSPro Configuration window.
 3. Selects PRACTICE, then opens the practice range.
 4. Optionally clicks your player tab in ProTee (for example, your name) if you set one.
@@ -16,14 +16,14 @@ On startup it works through the sequence on its own:
 
 If your launch monitor fails to connect, it can power-cycle the monitor through a Shelly smart plug and retry, so a flaky connection doesn't leave the bay dead in the morning.
 
-It reads the screen using the OCR built into Windows, so it clicks the words that are actually on screen rather than firing blind clicks at fixed coordinates. That makes it tolerant of small differences in layout and load timing from one machine to the next.
+It reads the screen using the OCR built into Windows, so it clicks the words that are actually on screen rather than firing blind clicks at fixed coordinates. That makes it tolerant of differences in layout, resolution, display scaling and load timing from one machine to the next.
 
 While the sequence runs, a small BA Custom Products banner sits along the bottom edge of the GSPro screen. It stays clear of every button the tool needs to click and goes away as soon as the bay is ready.
 
 ## Requirements
 
 - A Windows PC running your simulator (Windows 10 or 11).
-- GSPro.
+- GSPro and ProTee Labs.
 - Optional: a Shelly smart plug on the launch monitor's power, if you want automatic connection recovery.
 
 You do **not** need AutoHotkey installed to run the compiled `.exe` — it's self-contained. If you'd rather run the script directly, see [Running the script](#running-the-script-instead-of-the-exe) below.
@@ -31,22 +31,24 @@ You do **not** need AutoHotkey installed to run the compiled `.exe` — it's sel
 ## Install
 
 1. Download the latest installer, `ProTeeAutoStart-Setup-x.x.x.zip`, from the [Releases](../../releases) page.
-2. Extract it and run the setup. Keep **Start automatically when you log in** ticked — that's how the tool is meant to run on a bay PC, and it saves you setting up the startup shortcut by hand.
-3. Open ProTee AutoStart from the Start Menu and press `S` during the countdown. The Setup window opens — fill in your settings and click Save.
+2. Extract it and run the setup.
+   - Starting it with Windows? Keep **Start automatically when you log in** ticked. That's the usual way to run it on a bay PC.
+   - Starting it from a game launcher or kiosk instead? Untick it, and have your launcher run `ProTeeAutoStart.exe /run`.
+3. Open **ProTee AutoStart Setup** from the Start Menu, fill in your settings, and click Save. (The very first time the program runs, Setup also opens on its own.)
 
-Each release lists the SHA-256 of the download so you can verify it's genuine. Prefer no installer? `ProTeeAutoStart-x.x.x.zip` on the same page is the bare program; extract it somewhere permanent and drop a shortcut into `shell:startup` yourself.
-
-That's it. The next time the PC boots, it runs on its own.
+Each release lists the SHA-256 of the download so you can verify it's genuine. Prefer no installer? `ProTeeAutoStart-x.x.x.zip` on the same page is the bare program. Extract it somewhere permanent, run it once to open Setup, then drop a shortcut into `shell:startup` (or point your launcher at it with `/run`).
 
 ## Everyday use
 
-Starting it from a game launcher or kiosk instead of Windows startup? Untick **Start automatically when you log in** during install and have the launcher run `ProTeeAutoStart.exe /run`, which starts the sequence straight away with no countdown.
+Started from Windows startup, it shows a short countdown and then runs. Press `S` during the countdown to open Setup, or `ESC` to cancel. Started with `/run`, it skips the countdown and runs straight away.
 
-When it launches normally (from the Startup folder) it waits out a short countdown and then runs.
+While the sequence is running:
 
-- Press `S` during the countdown to open Setup.
-- Press `Ctrl+Shift+D` at any time while it's running to kill it instantly, even with the input lock on.
-- Press `ESC` at any time to abort the sequence.
+- **`ESC` stops it at any time** — including while the mouse and keyboard are paused, and even if AutoStart itself has frozen.
+- **`Ctrl+Shift+D` kills it instantly**, too.
+- **If AutoStart ever stops responding for 30 seconds, it is closed automatically**, so a bay can never be left stuck. (Change the 30 with `FreezeKillSec` in `settings.ini`.)
+
+`Ctrl+Alt+Del` always works as well.
 
 ## Settings
 
@@ -63,12 +65,12 @@ Everything is in the Setup window:
   - *Pre-click pause (ms)* — delay after moving the cursor before clicking. Raise it on slower machines.
 - **Alert webhook URL** — optional. If the sequence times out, it pings this URL (a Twilio number, a webhook relay, etc.) so you know a bay needs a look.
 - **Banner display monitor** — which screen the banner sits on. `Auto` follows GSPro automatically and is right for almost everyone. You can also force a monitor number (`1`, `2`, ...), or set it to `Off`.
-- **Lock the mouse and keyboard while it runs** — tick this so nobody standing at the bay can click or type while the tool is working. The tool's own clicks still go through, it needs no administrator rights, and it unlocks automatically the moment the tool finishes, times out, or closes. While the lock is on, ESC won't abort the run, but **Ctrl+Shift+D** kills AutoStart instantly (lock or no lock), and Ctrl+Alt+Del always works.
 - **Stop at the GSPro main menu** — tick this if you'd rather the bay finish on the GSPro main menu instead of going into the practice range. The tool still clicks Play and waits for the launch monitor to connect; it just stops at the menu and brings GSPro to the front so the ProTee connector window isn't sitting on top of it.
+- **Pause the mouse and keyboard while it runs** — tick this so a player who walks up early can't click or type over the tool while it's working. It's a guide, not a lock: the tool's own clicks still go through, `ESC` and `Ctrl+Shift+D` still stop it, it needs no administrator rights, and everything comes back the moment the tool finishes, times out, or closes.
 
 There are test buttons next to the settings: Test Power-Cycle fires the Shelly once so you can confirm the wiring, Test Screen Read runs a single OCR pass and shows what the tool currently sees, and Start Sequence Now runs the full sequence immediately without rebooting.
 
-Settings are saved to `Documents\BA Custom Products\ProTee Auto-Start\`.
+Settings and the activity log are saved in `Documents\BA Custom Products\ProTee Auto-Start\`.
 
 ## Running the script instead of the .exe
 
@@ -88,7 +90,7 @@ Prefer to build the `.exe` from source? Everything you need is in this repositor
 2. Put `ProTeeAutoStart.ahk`, `ProTeeAutoStart.ico`, and the three `.png` files in one folder.
 3. Open Ahk2Exe, select the script, choose the **ANSI 32-bit** base file, leave compression **off**, and compile.
 
-The icon, version info, and images are picked up automatically from directives inside the script, so your build comes out identical to a release build.
+The icon, version info, and images are picked up automatically from directives inside the script, so your build runs exactly the same program as a release build. (Its SHA-256 won't match the release, because the compiler pads each build slightly differently.)
 
 ## A note on the SmartScreen warning
 
@@ -98,15 +100,21 @@ The `.exe` isn't code-signed yet, so Windows SmartScreen may show a blue "Window
 
 - Where a button belongs to Windows — like Play on the GSPro Configuration dialog — it asks Windows for that button's exact position rather than reading the screen. That makes it immune to display scaling, resolution, monitor count, and anything sitting on top of the window.
 - Everywhere else it clicks specific on-screen words rather than blind coordinates.
-- `ESC` aborts instantly.
+- A small watchdog runs alongside it. `ESC` always stops the tool through the watchdog, even if the tool itself has frozen, and the watchdog closes the tool on its own if it stops responding.
 - An overall timeout stops it if something is wrong, and it can alert you over a webhook.
 - The banner is pinned to the bottom strip, clear of every button it reads or clicks.
 
 ## About BA Custom Products
 
-We build and share tools for golf simulator operators — booking systems you run on your own branded site, control-box hardware, and automation like this one. ProTee AutoStart is free; if it saves you time, take a look at what else we make.
+We build golf simulator hardware and software for facilities and home bays:
 
-[www.bacustomproducts.com](https://www.bacustomproducts.com)
+- **Control boxes** — physical button panels wired to drive your sim software, so players never need a keyboard.
+- **Booking systems** — reservations and payments on your own branded site.
+- **Automation tools** — like this one.
+
+ProTee AutoStart is free. If it helps your bay, please take a look at what else we make:
+
+**[www.bacustomproducts.com](https://www.bacustomproducts.com)**
 
 ## License
 
