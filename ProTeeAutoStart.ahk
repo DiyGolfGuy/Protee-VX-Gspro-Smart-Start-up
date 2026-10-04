@@ -4,9 +4,9 @@
 ;@Ahk2Exe-SetCompanyName BA Custom Products
 ;@Ahk2Exe-SetCopyright (c) 2026 BA Custom Products
 ;@Ahk2Exe-SetOrigFilename ProTeeAutoStart.exe
-;@Ahk2Exe-SetVersion 2.2.1.0
+;@Ahk2Exe-SetVersion 2.2.2.0
 ; ============================================================================
-;  ProTee Auto-Start Sequencer  v2.0   (OCR / reads the screen)
+;  ProTee Auto-Start Sequencer  v2.2.2   (OCR / reads the screen)
 ;  BA Custom Products
 ; ----------------------------------------------------------------------------
 ;  Runs at sim-PC startup. Reads on-screen TEXT with the Windows built-in OCR
@@ -39,7 +39,10 @@
 ;       the aim -> exit.
 ;    - The "ProTee United VX" window (General/Debug, "Not Ready") is NEVER
 ;      touched; it is left to fall behind.
-;    - ESC at any time during the sequence kills it instantly.
+;    - ESC or Ctrl+Shift+D at any time during the sequence kills it instantly,
+;      with or without the input lock. ESC is handled by a small watchdog copy
+;      of this program, so it works even if AutoStart itself has frozen; the
+;      watchdog also closes AutoStart on its own if it stops responding.
 ;    - 3 failed reconnects or an overall timeout -> alert + stop.
 ;
 ;  Because it reads rendered text and gets back real coordinates, it is
@@ -71,7 +74,8 @@
 ;      folder, just the bare .exe) shows a short countdown then auto-runs the
 ;      sequence. Press S during the countdown to open Setup, or Esc to cancel.
 ;    - /setup argument -> always opens Setup.
-;    - /run argument -> runs immediately with no countdown.
+;    - /run argument -> runs immediately with no countdown (use this from a
+;      game launcher or kiosk instead of the Startup folder).
 ;    Put the bare .exe (or a /run shortcut) in the Startup folder for unattended
 ;    boot, exactly like the timed tool.
 ;
@@ -81,7 +85,8 @@
 ; ============================================================================
 
 #NoEnv
-#SingleInstance Force
+#SingleInstance Off           ; replaced by EnforceSingleInstance(): the freeze watchdog is a second
+                              ; copy of this same program and must not close the main copy
 #Persistent
 #MaxHotkeysPerInterval 5000   ; the input lock swallows every physical key/button press -
 #HotkeyInterval 1000          ; a customer mashing keys must never trip AHK's warning dialog
@@ -114,6 +119,7 @@ global ClickDelayMs      := 1000      ; pause after moving the cursor, before cl
 global BannerMon         := "Auto"    ; banner monitor: Auto (follow GSPro), a number (1,2,...), or Off
 global StopAtMenu        := 0         ; 1 = end the sequence at the GSPro main menu instead of the practice range
 global LockInputWhileRunning := 0     ; 1 = physical mouse/keyboard locked while the sequence runs
+global FreezeKillSec     := 30        ; watchdog closes AutoStart if it stops responding this long
 
 ; --- sequence state ---
 global playClicked := false, practiceClicked := false, rangeClicked := false
@@ -126,6 +132,12 @@ global gBannerMon := ""
 global gBannerCloaked := false   ; true when Windows excludes the banner from screen captures
 global gBannerVisible := false   ; true while the banner is on screen
 global gInputLocked := false     ; true while the physical mouse/keyboard lock is on
+
+if (A_Args[1] = "/watchdog") {        ; started by StartWatchdog() - guard the main copy, nothing else
+    RunWatchdog(A_Args[2], A_Args[3], A_Args[4])
+    return
+}
+EnforceSingleInstance()
 
 FileCreateDir, %SettingsDir%
 LoadSettings()
@@ -149,7 +161,11 @@ return
 
 
 ; ===========================================================================
-;  ESC = instant kill (enabled only while the sequence is running)
+;  KILL KEYS (active while the sequence is running)
+;    ESC          - handled by the watchdog copy (WdEsc), so it works even if
+;                   this copy freezes. KillNow is the fallback if the watchdog
+;                   could not start.
+;    Ctrl+Shift+D - KillCombo, here and in the watchdog (WdCombo).
 ; ===========================================================================
 KillCombo:
     Log("Ctrl+Shift+D pressed - AutoStart killed instantly.")
@@ -349,9 +365,10 @@ RunSequence() {
     playClicked := false, practiceClicked := false, rangeClicked := false
     johnClicked := false, tries := 0, dbgRangeLogged := false
     bannerShown := false, menuReady := false, dbgUpdLogged := false, dbgFallbackLogged := false, dbgPlayLogged := false
-    Hotkey, Esc, KillNow, On
     Hotkey, ^+d, KillCombo, On UseErrorLevel   ; Ctrl+Shift+D = instant kill, lock or no lock
     Log("=== Startup sequence started ===")
+    if (!StartWatchdog())                      ; the watchdog owns ESC; if it could not start,
+        Hotkey, Esc, KillNow, On               ; this copy handles ESC itself
     if (LockInputWhileRunning)
         LockInput(true)
 
@@ -544,13 +561,102 @@ RunSequence() {
 
 
 ; ===========================================================================
+;  FREEZE WATCHDOG - a second, tiny copy of this program, started with
+;  /watchdog <pid> <hwnd> <seconds> when the sequence starts. It owns ESC (and
+;  also listens for Ctrl+Shift+D), so the kill keys work even if the main copy
+;  freezes - a frozen copy can't run its own hotkeys, but the input lock would
+;  keep going. If the main copy stops answering Windows for <seconds>, the
+;  watchdog closes it on its own. It exits as soon as the main copy is gone.
+; ===========================================================================
+StartWatchdog() {
+    global FreezeKillSec
+    args := "/watchdog " DllCall("GetCurrentProcessId") " " A_ScriptHwnd " " FreezeKillSec
+    if (A_IsCompiled)
+        Run, "%A_ScriptFullPath%" %args%,, UseErrorLevel, wdPid
+    else
+        Run, "%A_AhkPath%" "%A_ScriptFullPath%" %args%,, UseErrorLevel, wdPid
+    if (ErrorLevel = "ERROR" || !wdPid) {
+        Log("Watchdog could not start - ESC is handled by AutoStart itself.")
+        return false
+    }
+    ; Wait (max 3 s) until the watchdog has its keys and has renamed its window.
+    dhw := A_DetectHiddenWindows
+    DetectHiddenWindows, On
+    WinWait, BA AutoStart watchdog ahk_pid %wdPid%,, 3
+    ready := !ErrorLevel
+    DetectHiddenWindows, %dhw%
+    Log("Watchdog " (ready ? "running" : "started (slow to report)") " - ESC always stops AutoStart; it closes AutoStart if it freezes for " FreezeKillSec " s.")
+    return true
+}
+
+RunWatchdog(mainPid, mainHwnd, freezeSec) {
+    global gWdPid
+    gWdPid := mainPid + 0
+    freezeSec := (freezeSec + 0 >= 10) ? freezeSec + 0 : 30
+    Menu, Tray, NoIcon
+    Hotkey, Escape, WdEsc, On
+    Hotkey, ^+d, WdCombo, On UseErrorLevel
+    ; New title marks this copy as ready, and keeps EnforceSingleInstance() from matching it.
+    DllCall("SetWindowText", "Ptr", A_ScriptHwnd, "Str", "BA AutoStart watchdog")
+    hungMs := 0, last := A_TickCount
+    Loop {
+        Process, Exist, %gWdPid%
+        if (!ErrorLevel)
+            ExitApp                                   ; main copy finished or closed - nothing to guard
+        ; SMTO_ABORTIFHUNG: fails at once if Windows already sees the main copy as hung.
+        ok := DllCall("SendMessageTimeout", "Ptr", mainHwnd + 0, "UInt", 0, "Ptr", 0, "Ptr", 0
+                    , "UInt", 0x2, "UInt", 2000, "Ptr*", res, "Ptr")
+        now := A_TickCount
+        hungMs := ok ? 0 : hungMs + (now - last)
+        last := now
+        if (hungMs >= freezeSec * 1000) {
+            Log("Watchdog: AutoStart stopped responding for " freezeSec " seconds - closed it so the bay is not left stuck.")
+            Process, Close, %gWdPid%
+            ExitApp
+        }
+        Sleep, 1000
+    }
+}
+
+WdEsc:
+    Log("ESC pressed - AutoStart stopped.")
+    Process, Close, %gWdPid%
+    ExitApp
+return
+
+WdCombo:
+    Log("Ctrl+Shift+D pressed - AutoStart killed instantly.")
+    Process, Close, %gWdPid%
+    ExitApp
+return
+
+; Replaces "#SingleInstance Force": a new launch closes any older main copy of
+; this program. The watchdog renames its window, so it is never matched here.
+EnforceSingleInstance() {
+    dhw := A_DetectHiddenWindows, tmm := A_TitleMatchMode
+    DetectHiddenWindows, On
+    SetTitleMatchMode, 1
+    me := DllCall("GetCurrentProcessId")
+    WinGet, ids, List, %A_ScriptFullPath% ahk_class AutoHotkey
+    Loop, %ids% {
+        WinGet, pid, PID, % "ahk_id " ids%A_Index%
+        if (pid && pid != me)
+            Process, Close, %pid%
+    }
+    DetectHiddenWindows, %dhw%
+    SetTitleMatchMode, %tmm%
+}
+
+
+; ===========================================================================
 ;  INPUT LOCK - physical mouse and keyboard do nothing while the sequence runs,
 ;  but this tool's own moves, clicks and keystrokes still go through.
 ;  Built on AutoHotkey's keyboard/mouse hooks, which need NO administrator
 ;  rights (Windows' own BlockInput does). The hooks ignore input generated by
-;  AutoHotkey itself, so only physical input is swallowed. Ctrl+Alt+Del is
-;  handled by Windows and always works. Hooks die with the process, so every
-;  way the tool exits - done, timed out, gave up, crashed - releases the lock.
+;  AutoHotkey itself, so only physical input is swallowed. It is a guide, not
+;  a cage: ESC is never swallowed and always stops the tool (see the watchdog),
+;  Ctrl+Shift+D kills it, and Ctrl+Alt+Del is handled by Windows. Hooks die
+;  with the process, so every way the tool exits releases the lock.
 ; ===========================================================================
 LockInput(on) {
     global gInputLocked
@@ -558,20 +664,20 @@ LockInput(on) {
     if (on = gInputLocked)
         return
     opt := (on ? "On" : "Off") " UseErrorLevel B0 I0"
-    if (on)
-        Hotkey, Esc, Off, UseErrorLevel      ; ESC abort is locked out too (Ctrl+Alt+Del is the way out)
     for i, b in ["LButton", "RButton", "MButton", "XButton1", "XButton2", "WheelUp", "WheelDown", "WheelLeft", "WheelRight"]
         Hotkey, % "*" b, LockSwallow, %opt%
-    Loop, 511                               ; every keyboard key, by scan code (SC001-SC1FF)
+    Loop, 511 {                             ; every keyboard key, by scan code (SC001-SC1FF)
+        if (A_Index = 1)                    ; ...except ESC (SC001): ESC must always be able to stop it
+            continue
         Hotkey, % "*SC" Format("{:03X}", A_Index), LockSwallow, %opt%
+    }
     if (on) {
         BlockInput, MouseMove               ; last, after all Hotkey commands, so the mouse hook stays in
     } else {
         BlockInput, MouseMoveOff
-        Hotkey, Esc, KillNow, On UseErrorLevel
     }
     gInputLocked := on
-    Log(on ? "Input lock ON - physical mouse and keyboard locked (Ctrl+Shift+D kills AutoStart; Ctrl+Alt+Del still works)." : "Input lock OFF.")
+    Log(on ? "Input lock ON - physical mouse and keyboard paused while it works (ESC or Ctrl+Shift+D stops it)." : "Input lock OFF.")
 }
 
 LockSwallow:
@@ -1292,13 +1398,13 @@ ShowGUI:
     Gui, Main:Add, Edit, xm y+4 vBannerMon w240, %BannerMon%
 
     Gui, Main:Add, Checkbox, xm y+12 vStopAtMenu Checked%StopAtMenu%, Stop at the GSPro main menu (don't open the practice range)
-    Gui, Main:Add, Checkbox, xm y+8 w380 vLockInputWhileRunning Checked%LockInputWhileRunning%, Lock the mouse and keyboard while it runs (its own clicks still work; Ctrl+Shift+D always kills it)
+    Gui, Main:Add, Checkbox, xm y+8 w380 vLockInputWhileRunning Checked%LockInputWhileRunning%, Pause the mouse and keyboard while it runs (its own clicks still work; ESC or Ctrl+Shift+D stops it)
 
     Gui, Main:Add, Button, xm y+16 w160 gBtnTestRead, Test Screen Read
     Gui, Main:Add, Button, x+8 w130 gBtnStartNow, Start Sequence Now
     Gui, Main:Add, Button, x+8 w70 gBtnSave Default, Save
 
-    Gui, Main:Add, Text, xm y+12 w380 cGray, Once saved, launching this normally (e.g. from the Startup folder) auto-runs after a short countdown; press S then for Setup. ESC aborts the sequence; Ctrl+Shift+D kills it instantly, even with the lock on.
+    Gui, Main:Add, Text, xm y+12 w380 cGray, Once saved, launching this normally (e.g. from the Startup folder) auto-runs after a short countdown; press S then for Setup. ESC or Ctrl+Shift+D stops it at any time, even with the pause on.
 
     ; --- BA Custom Products ---
     Gui, Main:Add, Text, xm y+16 w384 0x10                          ; etched separator
@@ -1312,7 +1418,7 @@ ShowGUI:
         Gui, Main:Add, Text, xm y+10 w280, Enjoying this free tool?
         Gui, Main:Font, s9 Norm
         Gui, Main:Add, Text, xm y+4 w280, Support us by grabbing a control box or one of our other golf sim products.
-        Gui, Main:Add, Text, xm y+6 w280 cGray, www.bacustomproducts.com
+        Gui, Main:Add, Link, xm y+6 w280, <a href="https://www.bacustomproducts.com">www.bacustomproducts.com</a> - control boxes and more
     } else {
         Gui, Main:Font, s13 Bold cBlack
         Gui, Main:Add, Text, xm y+14, BA Custom Products
@@ -1331,7 +1437,7 @@ ShowGUI:
         Gui, Main:Font, s9 Norm cBlack
         Gui, Main:Add, Text, xm y+4 w384, Support us by grabbing a control box or one of our other products at:
         Gui, Main:Font, s10 Bold cBlack
-        Gui, Main:Add, Text, xm y+4 w384, www.bacustomproducts.com
+        Gui, Main:Add, Link, xm y+4 w384, <a href="https://www.bacustomproducts.com">www.bacustomproducts.com</a>
         Gui, Main:Font, s9 Norm
     }
 
@@ -1432,6 +1538,7 @@ LoadSettings() {
     IniRead, BannerMon,         %IniFile%, Display, BannerMon,      Auto
     IniRead, StopAtMenu,        %IniFile%, Options, StopAtMenu,     0
     IniRead, LockInputWhileRunning, %IniFile%, Options, LockInput,  0
+    IniRead, FreezeKillSec,     %IniFile%, Options, FreezeKillSec,  30
     for i, v in ["ShellyIP", "ShellyGen", "ProfileName", "ProTeeTitle", "AlertURL"]
         if (%v% = "ERROR")
             %v% := ""
@@ -1454,6 +1561,7 @@ WriteAllSettings() {
     IniWrite, %BannerMon%,         %IniFile%, Display, BannerMon
     IniWrite, %StopAtMenu%,        %IniFile%, Options, StopAtMenu
     IniWrite, %LockInputWhileRunning%, %IniFile%, Options, LockInput
+    IniWrite, %FreezeKillSec%,     %IniFile%, Options, FreezeKillSec
     IniWrite, 1,                   %IniFile%, State, Configured
 }
 

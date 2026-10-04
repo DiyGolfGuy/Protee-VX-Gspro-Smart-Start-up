@@ -1,0 +1,4 @@
+# Shows a "Sponsor" button on the repo page. No donations - it points people
+# to BA Custom Products, where the golf sim control boxes and other simulator
+# gear that keep this tool free are sold.
+custom: ["https://www.bacustomproducts.com"]
