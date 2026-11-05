@@ -4,9 +4,9 @@
 ;@Ahk2Exe-SetCompanyName BA Custom Products
 ;@Ahk2Exe-SetCopyright (c) 2026 BA Custom Products
 ;@Ahk2Exe-SetOrigFilename ProTeeAutoStart.exe
-;@Ahk2Exe-SetVersion 2.2.2.0
+;@Ahk2Exe-SetVersion 2.2.3.0
 ; ============================================================================
-;  ProTee Auto-Start Sequencer  v2.2.2   (OCR / reads the screen)
+;  ProTee Auto-Start Sequencer  v2.2.3   (OCR / reads the screen)
 ;  BA Custom Products
 ; ----------------------------------------------------------------------------
 ;  Runs at sim-PC startup. Reads on-screen TEXT with the Windows built-in OCR
@@ -125,6 +125,7 @@ global FreezeKillSec     := 30        ; watchdog closes AutoStart if it stops re
 global playClicked := false, practiceClicked := false, rangeClicked := false
 global johnClicked := false, tries := 0, startTick := 0, pausedMs := 0
 global dbgRangeLogged := false
+global dbgMenuLogged := false
 global dbgFallbackLogged := false
 global dbgPlayLogged := false
 global bannerShown := false
@@ -363,7 +364,7 @@ RunSequence() {
     startTick := A_TickCount
     pausedMs  := 0
     playClicked := false, practiceClicked := false, rangeClicked := false
-    johnClicked := false, tries := 0, dbgRangeLogged := false
+    johnClicked := false, tries := 0, dbgRangeLogged := false, dbgMenuLogged := false
     bannerShown := false, menuReady := false, dbgUpdLogged := false, dbgFallbackLogged := false, dbgPlayLogged := false
     Hotkey, ^+d, KillCombo, On UseErrorLevel   ; Ctrl+Shift+D = instant kill, lock or no lock
     Log("=== Startup sequence started ===")
@@ -409,6 +410,16 @@ RunSequence() {
         if (!rangeClicked && !menuReady) {
             if (!playClicked) {
                 cfg := ScanWin("gspro configuration")
+                if (!cfg.found) {
+                    ; Newer GSPro can open straight to its main menu, with no
+                    ; configuration window and so no Play! to click.
+                    m := ScanWin("gspro", "configuration")
+                    if (m.found && IsGSProMenu(m)) {
+                        playClicked := true
+                        Log("GSPro opened straight to its main menu (no configuration window) - nothing to click for Play.")
+                        continue
+                    }
+                }
                 ; Ask Windows for the button position first - no reading involved,
                 ; so display scaling and unreadable button text cannot break it.
                 if (cfg.found) {
@@ -481,9 +492,13 @@ RunSequence() {
                     pr := FindPracticeTile(menu)
                     if (pr.found) {
                         ClickLineObj(pr), practiceClicked := true
-                        Log("Clicked PRACTICE")
+                        Log("Clicked PRACTICE at " (pr.x + pr.w // 2) "," (pr.y + pr.h // 2))
                         Sleep, 1500
                         continue
+                    }
+                    if (!dbgMenuLogged) {
+                        dbgMenuLogged := true
+                        Log("On the GSPro main menu but the PRACTICE tile was not located. GSPro text read as:`n" SubStr(menu.text, 1, 1400))
                     }
                 }
                 if (menu.found && IsGSProMenu(full)) {
@@ -507,7 +522,7 @@ RunSequence() {
                     tile := FindPracticeRangeTile(menu)
                     if (tile.found) {
                         ClickLineObj(tile), rangeClicked := true
-                        Log("Clicked PRACTICE RANGE tile")
+                        Log("Clicked PRACTICE RANGE tile (" tile.text ") at " (tile.x + tile.w // 2) "," (tile.y + tile.h // 2))
                         Sleep, 1500
                         continue
                     }
@@ -898,6 +913,37 @@ Lum(c) {
 ; Final step: make the GSPro range the active window, park the cursor in the
 ; corner out of the way, and press A to reset the aim (the focusing click throws
 ; the aim off, A snaps it back to default).
+; Where to click on the GSPro main menu without pressing anything: in the scenery
+; below the header and above the tiles, to the right of the ProTee United VX window
+; when it sits over GSPro, never on text and never on that window.
+MenuIdleClickPoint(gw, scan) {
+    top := gw.y + Round(gw.h * 0.18), bot := gw.y + Round(gw.h * 0.55)
+    left := gw.x + Round(gw.w * 0.05), right := gw.x + Round(gw.w * 0.88)   ; clear of the side tabs
+    cw := WinRectByTitle("protee united")
+    over := cw.found && cw.x < right && cw.x + cw.w > left && cw.y < bot && cw.y + cw.h > top
+    cands := []
+    if (over) {
+        cy := Min(Max(cw.y + cw.h // 2, top), bot)
+        if (cw.x + cw.w < right - 40)
+            cands.Push({x: (cw.x + cw.w + right) // 2, y: cy, why: "right of the ProTee United VX window"})
+        if (cw.x > left + 40)
+            cands.Push({x: (left + cw.x) // 2, y: cy, why: "left of the ProTee United VX window"})
+    }
+    cands.Push({x: gw.x + Round(gw.w * 0.70), y: gw.y + Round(gw.h * 0.40), why: "open scenery"})
+    cands.Push({x: gw.x + Round(gw.w * 0.30), y: gw.y + Round(gw.h * 0.40), why: "open scenery"})
+    for i, p in cands {
+        if (over && p.x >= cw.x && p.x <= cw.x + cw.w && p.y >= cw.y && p.y <= cw.y + cw.h)
+            continue
+        onText := false
+        for k, ln in scan.lines
+            if (p.x >= ln.x - 25 && p.x <= ln.x + ln.w + 25 && p.y >= ln.y - 25 && p.y <= ln.y + ln.h + 25)
+                onText := true
+        if (!onText)
+            return p
+    }
+    return cands[1]
+}
+
 FinishUp(menuMode := false) {
     global gBannerMon
     gw := WinRectByTitle("gspro", "configuration")
@@ -909,15 +955,14 @@ FinishUp(menuMode := false) {
     ; Park on the monitor the banner confirmed as GSPro's; fall back to the window's own monitor.
     mon := IsObject(gBannerMon) ? gBannerMon : MonitorOf(gw.x + gw.w // 2, gw.y + gw.h // 2)
     if (menuMode) {
-        ; Stop-at-menu: click the empty strip near the bottom of the GSPro window,
-        ; below the menu tiles, so the ProTee connector drops behind GSPro the same
-        ; way it does when PRACTICE is clicked. No aim-reset here - not on the range.
-        cx := gw.x + gw.w // 2
-        cy := gw.y + Round(gw.h * 0.96)
-        ClickAt(cx, cy)
+        ; Stop-at-menu: click an empty spot on GSPro so GSPro comes to the front and
+        ; the ProTee United VX window drops behind it - what clicking PRACTICE does.
+        ; No aim-reset here - not on the range.
+        p := MenuIdleClickPoint(gw, ScanWin("gspro", "configuration"))
+        ClickAt(p.x, p.y)
         Sleep, 300
         MouseMove, % mon.right - 2, % mon.bottom - 2, 0
-        Log("Final: stopped at the GSPro main menu, clicked below the tiles to drop the connector behind, parked cursor.")
+        Log("Final: stopped at the GSPro main menu, clicked GSPro at " p.x "," p.y " (" p.why ") to put the ProTee window behind it, parked cursor.")
         return
     }
     cx := mon.left + (mon.right - mon.left) // 2
@@ -949,6 +994,7 @@ IsPracticeRangeScreen(scan) {
     return ( InStr(t, "on course")
           || InStr(t, "endless bucket")
           || InStr(t, "head to the range")
+          || InStr(t, "additional ranges")
           || (InStr(t, "practice") && InStr(t, "range")) )
 }
 IsTroubleshootPopup(scan) {
@@ -1088,6 +1134,10 @@ OcrRegion(x, y, w, h) {
     for i, ln in res.lines {
         ln.x += x
         ln.y += y
+        for j, w in ln.words {
+            w.x += x
+            w.y += y
+        }
         o.lines.Push(ln)
     }
     o.text := res.text
@@ -1116,6 +1166,21 @@ FindLineExact(scan, needle) {
     return {found: false}
 }
 
+; A word folded for matching: lower case, letters only, common OCR slips mended
+; (1 | ! l read for i, 0 read for o). Only compared against words with no real l.
+NormWord(t) {
+    t := LowerStr(t)
+    t := RegExReplace(t, "[1|!l]", "i")
+    t := StrReplace(t, "0", "o")
+    return RegExReplace(t, "[^a-z]")
+}
+
+; Click target covering words a..b of one line.
+WordBox(a, b) {
+    x2 := Max(a.x + a.w, b.x + b.w), y1 := Min(a.y, b.y), y2 := Max(a.y + a.h, b.y + b.h)
+    return {found: true, x: a.x, y: y1, w: x2 - a.x, h: y2 - y1, text: (a = b) ? a.text : a.text " " b.text}
+}
+
 FindPlay(scan) {
     for i, ln in scan.lines {
         lt := LowerStr(Trim(ln.text))
@@ -1126,15 +1191,29 @@ FindPlay(scan) {
 }
 
 FindPracticeTile(scan) {
+    ; Old GSPro menu: the PRACTICE label comes back as a line of its own.
     r := FindLineExact(scan, "practice")
     if (r.found)
         return r
+    ; New GSPro menu (Nov 2026): PLAY PRACTICE CHALLENGES TOURNAMENTS ONLINE MATCH sit
+    ; in one straight row and OCR can return the row as one line - whose middle is
+    ; CHALLENGES. Click the PRACTICE word itself: the lowest one on screen is the tile
+    ; label (not a sentence in the banner above the tiles).
+    best := ""
     for i, ln in scan.lines {
-        lt := LowerStr(ln.text)
-        if (InStr(lt, "practice") && !InStr(lt, "on course") && !InStr(lt, "range"))
-            return {found: true, x: ln.x, y: ln.y, w: ln.w, h: ln.h, text: ln.text}
+        ws := ln.words
+        for j, w in ws {
+            if (NormWord(w.text) != "practice")
+                continue
+            nxt := (j < ws.Length()) ? NormWord(ws[j + 1].text) : ""
+            prv := (j > 1) ? NormWord(ws[j - 1].text) : ""
+            if (nxt = "range" || prv = "course")        ; "practice range" / "on course practice"
+                continue
+            if (!IsObject(best) || w.y > best.y)
+                best := w
+        }
     }
-    return {found: false}
+    return IsObject(best) ? WordBox(best, best) : {found: false}
 }
 
 ; The PRACTICE RANGE tile (left), not the heading and not ON COURSE PRACTICE.
@@ -1143,12 +1222,28 @@ FindPracticeTile(scan) {
 ; "range" that isn't part of "on course" is the tile (works whether OCR keeps
 ; "PRACTICE RANGE" as one line or splits it into PRACTICE / RANGE).
 FindPracticeRangeTile(scan) {
+    ; New GSPro (Nov 2026): the tiles read GSPRO PRACTICE RANGE | ON COURSE PRACTICE |
+    ; ADDITIONAL RANGES, side by side. Click the "GSPRO PRACTICE" words themselves.
+    for i, ln in scan.lines {
+        ws := ln.words, n := ws.Length()
+        for j, w in ws {
+            t := NormWord(w.text)
+            if (t = "gspropractice")
+                return WordBox(w, w)
+            if (t = "gspro" && j < n && NormWord(ws[j + 1].text) = "practice")
+                return WordBox(w, ws[j + 1])
+            if (t = "gs" && j + 1 < n && NormWord(ws[j + 1].text) = "pro" && NormWord(ws[j + 2].text) = "practice")
+                return WordBox(w, ws[j + 2])
+        }
+    }
+    ; Old GSPro: the lowest line mentioning "range", skipping On Course Practice
+    ; (and Additional Ranges, which only the new screen has).
     best := "", besty := -1
     for i, ln in scan.lines {
         lt := LowerStr(ln.text)
         if (!InStr(lt, "range"))
             continue
-        if (InStr(lt, "on course"))
+        if (InStr(lt, "on course") || InStr(lt, "additional"))
             continue
         if (ln.y > besty) {
             besty := ln.y
@@ -1492,6 +1587,10 @@ BtnTestRead:
         r := FindLine(scan, tg)
         report .= "  " tg ": " (r.found ? "FOUND at " (r.x + r.w // 2) "," (r.y + r.h // 2) : "-") "`n"
     }
+    r := FindPracticeTile(scan)
+    report .= "  PRACTICE tile the sequence clicks: " (r.found ? "at " (r.x + r.w // 2) "," (r.y + r.h // 2) " [" r.text "]" : "-") "`n"
+    r := FindPracticeRangeTile(scan)
+    report .= "  PRACTICE RANGE tile the sequence clicks: " (r.found ? "at " (r.x + r.w // 2) "," (r.y + r.h // 2) " [" r.text "]" : "-") "`n"
     if (ProfileName != "") {
         r := FindLine(scan, ProfileName)
         report .= "  [profile] " ProfileName ": " (r.found ? "FOUND at " (r.x + r.w // 2) "," (r.y + r.h // 2) : "-") "`n"
@@ -1610,6 +1709,16 @@ CLSIDFromString(IID, ByRef CLSID) {
 
 ; Returns {lines: [ {text, x, y, w, h}, ... ], text: "<all lines>`n"}
 ; Coordinates are relative to the captured bitmap's top-left.
+; Read a WinRT HSTRING and release it (OCR line and word text).
+HStringText(h) {
+    if (!h)
+        return ""
+    buffer := DllCall("Combase.dll\WindowsGetStringRawBuffer", "ptr", h, "uint*", length, "ptr")
+    t := StrGet(buffer, length, "UTF-16")
+    DllCall("Combase.dll\WindowsDeleteString", "ptr", h)
+    return t
+}
+
 ocr_words(file) {
     static OcrEngineStatics, OcrEngine, MaxDimension, BitmapDecoderStatics
     if (OcrEngineStatics = "") {
@@ -1651,8 +1760,9 @@ ocr_words(file) {
     loop % lineCount {
         DllCall(NumGet(NumGet(LinesList + 0) + 6 * A_PtrSize), "ptr", LinesList, "int", A_Index - 1, "ptr*", OcrLine)   ; GetAt
         DllCall(NumGet(NumGet(OcrLine + 0) + 7 * A_PtrSize), "ptr", OcrLine, "ptr*", hText)   ; get_Text
-        buffer := DllCall("Combase.dll\WindowsGetStringRawBuffer", "ptr", hText, "uint*", length, "ptr")
-        lineText := StrGet(buffer, length, "UTF-16")
+        lineText := HStringText(hText)
+        tokens := StrSplit(lineText, " ")
+        words := []
 
         DllCall(NumGet(NumGet(OcrLine + 0) + 6 * A_PtrSize), "ptr", OcrLine, "ptr*", WordsList)   ; get_Words
         DllCall(NumGet(NumGet(WordsList + 0) + 7 * A_PtrSize), "ptr", WordsList, "int*", wordCount)   ; Size
@@ -1662,6 +1772,12 @@ ocr_words(file) {
             VarSetCapacity(RECT, 16, 0)
             DllCall(NumGet(NumGet(OcrWord + 0) + 6 * A_PtrSize), "ptr", OcrWord, "ptr", &RECT)   ; get_BoundingRect (X,Y,W,H floats)
             wx := NumGet(RECT, 0, "Float"), wy := NumGet(RECT, 4, "Float"), ww := NumGet(RECT, 8, "Float"), wh := NumGet(RECT, 12, "Float")
+            hw := 0
+            DllCall(NumGet(NumGet(OcrWord + 0) + 7 * A_PtrSize), "ptr", OcrWord, "ptr*", hw)   ; get_Text
+            wt := HStringText(hw)
+            if (wt = "" && tokens.Length() = wordCount)          ; fall back to the line's own spelling
+                wt := tokens[A_Index]
+            words.Push({text: wt, x: Round(wx), y: Round(wy), w: Round(ww), h: Round(wh)})
             if (wx < lx1)
                 lx1 := wx
             if (wy < ly1)
@@ -1676,6 +1792,7 @@ ocr_words(file) {
 
         line := {}
         line.text := lineText
+        line.words := words
         if (wordCount > 0) {
             line.x := Round(lx1), line.y := Round(ly1), line.w := Round(lx2 - lx1), line.h := Round(ly2 - ly1)
         } else {

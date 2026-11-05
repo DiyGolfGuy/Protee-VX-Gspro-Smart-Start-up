@@ -9,8 +9,8 @@ Hands-off startup for golf simulator bays. ProTee AutoStart watches the screen, 
 When it runs, it works through the sequence on its own:
 
 1. Clicks through the ProTee update prompt if one appears (clicks Download Update and waits for it to finish).
-2. Clicks Play! on the GSPro Configuration window.
-3. Selects PRACTICE, then opens the practice range.
+2. Clicks Play! on the GSPro Configuration window (newer GSPro versions that open straight to the menu skip this step).
+3. Selects PRACTICE, then opens the practice range. Works with both the older GSPro menu and the new November 2026 menu.
 4. Optionally clicks your player tab in ProTee (for example, your name) if you set one.
 5. Leaves GSPro focused at the range, parks the mouse out of the way in a corner, and resets the aim.
 
@@ -65,7 +65,7 @@ Everything is in the Setup window:
   - *Pre-click pause (ms)* — delay after moving the cursor before clicking. Raise it on slower machines.
 - **Alert webhook URL** — optional. If the sequence times out, it pings this URL (a Twilio number, a webhook relay, etc.) so you know a bay needs a look.
 - **Banner display monitor** — which screen the banner sits on. `Auto` follows GSPro automatically and is right for almost everyone. You can also force a monitor number (`1`, `2`, ...), or set it to `Off`.
-- **Stop at the GSPro main menu** — tick this if you'd rather the bay finish on the GSPro main menu instead of going into the practice range. The tool still clicks Play and waits for the launch monitor to connect; it just stops at the menu and brings GSPro to the front so the ProTee connector window isn't sitting on top of it.
+- **Stop at the GSPro main menu** — tick this if you'd rather the bay finish on the GSPro main menu instead of going into the practice range. The tool still clicks Play and waits for the launch monitor to connect; then it clicks an empty spot on GSPro, to the right of the ProTee United VX window, so that window drops behind GSPro instead of sitting on top of the menu.
 - **Pause the mouse and keyboard while it runs** — tick this so a player who walks up early can't click or type over the tool while it's working. It's a guide, not a lock: the tool's own clicks still go through, `ESC` and `Ctrl+Shift+D` still stop it, it needs no administrator rights, and everything comes back the moment the tool finishes, times out, or closes.
 
 There are test buttons next to the settings: Test Power-Cycle fires the Shelly once so you can confirm the wiring, Test Screen Read runs a single OCR pass and shows what the tool currently sees, and Start Sequence Now runs the full sequence immediately without rebooting.
