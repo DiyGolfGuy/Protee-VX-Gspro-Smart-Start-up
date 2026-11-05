@@ -4,9 +4,9 @@
 ;@Ahk2Exe-SetCompanyName BA Custom Products
 ;@Ahk2Exe-SetCopyright (c) 2026 BA Custom Products
 ;@Ahk2Exe-SetOrigFilename ProTeeAutoStart.exe
-;@Ahk2Exe-SetVersion 2.2.3.0
+;@Ahk2Exe-SetVersion 2.2.4.0
 ; ============================================================================
-;  ProTee Auto-Start Sequencer  v2.2.3   (OCR / reads the screen)
+;  ProTee Auto-Start Sequencer  v2.2.4   (OCR / reads the screen)
 ;  BA Custom Products
 ; ----------------------------------------------------------------------------
 ;  Runs at sim-PC startup. Reads on-screen TEXT with the Windows built-in OCR
@@ -411,10 +411,14 @@ RunSequence() {
             if (!playClicked) {
                 cfg := ScanWin("gspro configuration")
                 if (!cfg.found) {
-                    ; Newer GSPro can open straight to its main menu, with no
-                    ; configuration window and so no Play! to click.
+                    ; Newer GSPro opens straight to its main menu, with no
+                    ; configuration window and so no Play! to click. Trust the
+                    ; whole-screen read too, like the other steps do.
                     m := ScanWin("gspro", "configuration")
-                    if (m.found && IsGSProMenu(m)) {
+                    viaWin := m.found && IsGSProMenu(m)
+                    if (viaWin || (GSProWindowOpen() && IsGSProMenu(full))) {
+                        if (!viaWin)
+                            LogFallback("The GSPro main menu", m)
                         playClicked := true
                         Log("GSPro opened straight to its main menu (no configuration window) - nothing to click for Play.")
                         continue
@@ -501,7 +505,7 @@ RunSequence() {
                         Log("On the GSPro main menu but the PRACTICE tile was not located. GSPro text read as:`n" SubStr(menu.text, 1, 1400))
                     }
                 }
-                if (menu.found && IsGSProMenu(full)) {
+                if (GSProWindowOpen() && IsGSProMenu(full)) {
                     if (StopAtMenu) {
                         menuReady := true
                         Log("GSPro main menu reached - stopping here (Stop at main menu is on).")
@@ -531,7 +535,7 @@ RunSequence() {
                         Log("On practice-range screen but tile not located. GSPro text read as:`n" SubStr(menu.text, 1, 1400))
                     }
                 }
-                if (menu.found && IsPracticeRangeScreen(full)) {
+                if (GSProWindowOpen() && IsPracticeRangeScreen(full)) {
                     tile := FindPracticeRangeTile(full)
                     if (tile.found) {
                         LogFallback("PRACTICE RANGE", menu)
@@ -913,6 +917,23 @@ Lum(c) {
 ; Final step: make the GSPro range the active window, park the cursor in the
 ; corner out of the way, and press A to reset the aim (the focusing click throws
 ; the aim off, A snaps it back to default).
+; The screen area GSPro's menu fills: GSPro's own rectangle when it looks right,
+; otherwise (no usable size, or a scaled rectangle on mixed-scaling displays) the
+; whole monitor GSPro is on. A windowed GSPro inside its monitor keeps its rectangle.
+MenuClickArea(gw, mon) {
+    mw := mon.right - mon.left, mh := mon.bottom - mon.top
+    full := {x: mon.left, y: mon.top, w: mw, h: mh}
+    if (!gw.found || gw.w <= 0 || gw.h <= 0)
+        return full
+    if (gw.w * gw.h >= 0.9 * mw * mh)
+        return gw
+    inside := gw.x >= mon.left && gw.x + gw.w <= mon.right && gw.y >= mon.top && gw.y + gw.h <= mon.bottom
+    ; A rectangle pinned to the monitor's top-left corner and short of its size is
+    ; the scaled one; anything else inside the monitor is a real window.
+    scaled := (gw.x = mon.left && gw.y = mon.top && Abs(gw.w / mw - gw.h / mh) < 0.02)
+    return (inside && !scaled) ? gw : full
+}
+
 ; Where to click on the GSPro main menu without pressing anything: in the scenery
 ; below the header and above the tiles, to the right of the ProTee United VX window
 ; when it sits over GSPro, never on text and never on that window.
@@ -947,18 +968,22 @@ MenuIdleClickPoint(gw, scan) {
 FinishUp(menuMode := false) {
     global gBannerMon
     gw := WinRectByTitle("gspro", "configuration")
-    if (!gw.found) {
+    if (!gw.found && !GSProWindowOpen()) {
         Log("GSPro window not found for final focus / aim-reset; skipping.")
         return
     }
-    WinActivate, % "ahk_id " gw.hwnd
+    if (gw.found)
+        WinActivate, % "ahk_id " gw.hwnd
+    else
+        WinActivate, GSPro                     ; title starts with GSPro (default match mode)
     ; Park on the monitor the banner confirmed as GSPro's; fall back to the window's own monitor.
-    mon := IsObject(gBannerMon) ? gBannerMon : MonitorOf(gw.x + gw.w // 2, gw.y + gw.h // 2)
+    mon := IsObject(gBannerMon) ? gBannerMon : (gw.found ? MonitorOf(gw.x + gw.w // 2, gw.y + gw.h // 2) : MonitorOf(0, 0))
     if (menuMode) {
         ; Stop-at-menu: click an empty spot on GSPro so GSPro comes to the front and
         ; the ProTee United VX window drops behind it - what clicking PRACTICE does.
         ; No aim-reset here - not on the range.
-        p := MenuIdleClickPoint(gw, ScanWin("gspro", "configuration"))
+        area := MenuClickArea(gw, mon)
+        p := MenuIdleClickPoint(area, OcrRegion(area.x, area.y, area.w, area.h))
         ClickAt(p.x, p.y)
         Sleep, 300
         MouseMove, % mon.right - 2, % mon.bottom - 2, 0
@@ -1340,9 +1365,27 @@ LogFallback(step, scan) {
         return
     dbgFallbackLogged := true
     r := scan.win
-    Log("NOTE: " step " was not readable inside the GSPro window itself, but the whole-screen read found it."
-      . " Windows reported that window at x" r.x " y" r.y " w" r.w " h" r.h "."
+    where := IsObject(r) ? " Windows reported that window at x" r.x " y" r.y " w" r.w " h" r.h "." : " Windows gave no usable size for the GSPro window."
+    Log("NOTE: " step " was not readable inside the GSPro window itself, but the whole-screen read found it." where
       . " If that rectangle looks wrong for where the window actually is, the two displays are very likely on different scaling.")
+}
+
+; The GSPro main window is open (any size - some setups report no usable rectangle).
+GSProWindowOpen() {
+    dhw := A_DetectHiddenWindows
+    DetectHiddenWindows, Off
+    WinGet, idList, List
+    found := false
+    Loop, %idList% {
+        WinGetTitle, t, % "ahk_id " idList%A_Index%
+        tl := LowerStr(t)
+        if (InStr(tl, "gspro") && !InStr(tl, "configuration")) {
+            found := true
+            break
+        }
+    }
+    DetectHiddenWindows, %dhw%
+    return found
 }
 
 MonitorOf(x, y) {
